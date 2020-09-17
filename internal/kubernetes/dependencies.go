@@ -44,9 +44,11 @@ func FindPodDependencies(pod *corev1.Pod) []Dependency {
 
 	for _, ref := range pod.Spec.ImagePullSecrets {
 		deps = append(deps, Dependency{
-			Kind:     DependencyKindSecret,
-			Name:     ref.Name,
-			Optional: false,
+			Kind: DependencyKindSecret,
+			Name: ref.Name,
+			// Image pull secrets are optional; a pod will start without one as
+			// long as it can pull its image.
+			Optional: true,
 		})
 	}
 
