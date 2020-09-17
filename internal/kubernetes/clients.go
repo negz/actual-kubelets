@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 )
@@ -25,13 +26,21 @@ type Client struct {
 
 // NewClient returns a client for a Kubernetes cluster.
 func NewClient(cc ClientConfig) (Client, error) {
-	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{ExplicitPath: cc.KubeConfigPath},
-		&clientcmd.ConfigOverrides{}).ClientConfig()
-	if err != nil {
-		return Client{}, errors.Wrap(err, "cannot load kubeconfig file")
+	var cfg *rest.Config
+	var err error
+	if cc.KubeConfigPath != "" {
+		cfg, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+			&clientcmd.ClientConfigLoadingRules{ExplicitPath: cc.KubeConfigPath},
+			&clientcmd.ConfigOverrides{}).ClientConfig()
 
+	} else {
+		// Fall back to in-cluster config if no kubeconfig file was supplied.
+		cfg, err = config.GetConfig()
 	}
+	if err != nil {
+		return Client{}, errors.Wrap(err, "cannot configure Kubernetes client")
+	}
+
 	s := runtime.NewScheme()
 	if err := corev1.AddToScheme(s); err != nil {
 		return Client{}, errors.Wrap(err, "cannot register core API types with Kubernetes client")
