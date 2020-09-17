@@ -1,0 +1,10 @@
+apiVersion: v1
+appVersion: 0.0.1
+description: A Helm chart to install a Virtual Kubelet powered by actual Kubelets 
+maintainers:
+- email: negz@rk0n.org
+  name: Nic Cope
+name: vk-ak
+sources:
+- https://github.com/negz/actual-kubelets
+version: 0.0.1

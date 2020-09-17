@@ -1,0 +1,37 @@
+image:
+  repository: negz
+  name: actual-kubelets
+  tag: "5010729"
+  pullPolicy: Always
+
+logLevel: debug
+
+# Whether this node should be tainted.
+taint:
+  enabled: false
+  key: virtual-kubelet.io/provider
+  value: actual-kubelets
+  effect: NoSchedule
+
+
+rbac:
+  # The cluster role the virtual kubelet should run as.
+  # TODO(negz): We should run as system:node, but we need permission to approve
+  # our own CertificateSigningRequest.
+  bindClusterRole: cluster-admin
+
+# The 'remote' cluster - the cluster in which this Virtual Kubelet creates pods.
+# All values are required.
+remote:
+  # Remote API server CA data - not base64 encoded.
+  caData:
+  # Remote API server IP, without protocol or port. (HTTPS on port port 443 is
+  # assumed).
+  apiserverHost:
+  # Service account token used to authenticate to the remote API server.
+  token:
+
+local:
+  # Local API server IP, without protocol or port. (HTTPS on port port 443 is
+  # assumed). 
+  apiserverHost:

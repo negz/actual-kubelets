@@ -10,6 +10,4 @@ RUN go build -o virtual-kubelet ./cmd/virtual-kubelet
 FROM alpine:3.11
 
 RUN apk update && apk add ca-certificates
-RUN addgroup -S user && adduser -S user -G user
-USER user
 COPY --from=build /go/actual-kubelets/virtual-kubelet /bin/virtual-kubelet

@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "vk.fullname" . }}
+{{ include "vk.labels" . | indent 2 }}
+    component: kubelet
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ template "vk.fullname" . }}
+  template:
+    metadata:
+{{ include "vk.labels" . | indent 6 }}
+        component: kubelet
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+      labels:
+        app: {{ template "vk.fullname" . }}
+    spec:
+      initContainers:
+      - command:
+        - bash
+        - -c
+        - /opt/csr/get-cert.sh
+        env:
+        # NODE_NAME is only used to name the cert and key files.
+        - name: NODE_NAME
+          value: "{{ template "vk.fullname" . }}"
+        - name: CERT_DIR
+          value: /etc/vk-certs
+        image: elotl/init-cert:v1.0.0-34-g75331fe
+        imagePullPolicy: Always
+        name: init-cert
+        resources: {}
+        volumeMounts:
+        - mountPath: /etc/vk-certs
+          name: certs
+      containers:
+      - name: {{ template "vk.fullname" . }}
+        image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: KUBELET_PORT
+          value: "10250"
+        - name: VKUBELET_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: APISERVER_CERT_LOCATION
+          value: /etc/vk-certs/{{ template "vk.fullname" .}}.crt
+        - name: APISERVER_KEY_LOCATION
+          value: /etc/vk-certs/{{ template "vk.fullname" .}}.key
+        - name: VKUBELET_TAINT_KEY
+          value: {{ .Values.taint.key }}
+        - name: VKUBELET_TAINT_VALUE
+          value: {{ tpl .Values.taint.value $ }}
+        - name: VKUBELET_TAINT_EFFECT
+          value: {{ .Values.taint.effect }}
+        volumeMounts:
+        - name: config
+          mountPath: "/etc/vk-config"
+        - name: certs
+          mountPath: "/etc/vk-certs"
+        command: ["virtual-kubelet"]
+        args: [
+          {{- if not .Values.taint.enabled }}
+           "--disable-taint",
+          {{- end }}
+         "--provider", "actual-kubelets",
+         "--provider-config", "/etc/vk-config/config.toml",
+         "--nodename", "{{ template "vk.fullname" . }}",
+         {{- if .Values.logLevel }}
+         "--log-level", "{{.Values.logLevel}}",
+         {{- end }}
+         "--os", "Linux"
+        ]
+      volumes:
+      - name: certs
+        emptyDir: {}
+      - name: config
+        secret:
+          secretName: {{ template "vk.fullname" . }}
+      serviceAccountName: "{{ template "vk.fullname" . }}"
