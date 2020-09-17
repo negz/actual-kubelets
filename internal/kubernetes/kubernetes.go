@@ -36,7 +36,7 @@ func NewProvider(ic provider.InitConfig) (provider.Provider, error) {
 		return nil, errors.New("provider config file is required")
 	}
 
-	cfg, err := ParseConfig(ic.ConfigPath)
+	cfg, err := ParseConfigFile(ic.ConfigPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot parse provider config")
 	}
@@ -55,7 +55,10 @@ func NewProvider(ic provider.InitConfig) (provider.Provider, error) {
 		dependencies: NewAPIDependencyFetcher(local),
 		remote:       remote,
 		nodeName:     ic.NodeName,
-		cfg:          cfg,
+		cfg: Config{
+			InitConfig: ic,
+			ConfigFile: cfg,
+		},
 	}
 
 	return p, nil
@@ -306,6 +309,19 @@ func (t *tsq) Next() *remotecommand.TerminalSize {
 // ConfigureNode enables a provider to configure the node object that
 // will be used for Kubernetes.
 func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
+	n.Status.NodeInfo.OperatingSystem = p.cfg.OperatingSystem
+
+	n.Status.Addresses = []corev1.NodeAddress{
+		{Type: corev1.NodeInternalIP, Address: p.cfg.InternalIP},
+	}
+
+	n.Status.DaemonEndpoints = corev1.NodeDaemonEndpoints{
+		KubeletEndpoint: corev1.DaemonEndpoint{Port: p.cfg.DaemonPort},
+	}
+
+	// TODO(negz): Dynamically infer these from the resources the remote cluster
+	// has available? This could be difficult to measure given that the remote
+	// cluster may autoscale. These should probably just be configurable.
 	n.Status.Allocatable = corev1.ResourceList{
 		corev1.ResourceCPU:     resource.MustParse("100"),
 		corev1.ResourceMemory:  resource.MustParse("1024G"),
