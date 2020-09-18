@@ -49,9 +49,6 @@ func NewProvider(ic provider.InitConfig) (provider.Provider, error) {
 		return nil, errors.Wrap(err, "cannot create client for local (kubelet) API server")
 	}
 
-	// TODO(negz): Fail if cfg.Remote.KubeConfigPath is not supplied. Omitting
-	// this setting currently results in AK using one API server as both local
-	// and remote, which can result in an endless loop of pod creation.
 	remote, err := NewClient(cfg.Remote)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot create client for remote (backing) API server")
@@ -133,11 +130,6 @@ func (p *Provider) DeletePod(ctx context.Context, lcl *corev1.Pod) error {
 	// in the remote cluster.
 	rmt := lcl.DeepCopy()
 	remote.PreparePod(p.nodeName, rmt)
-
-	// TODO(negz): Figure out why we're seeing the below error:
-	// error while updating pod status in kubernetes: Pod \"negztest\" is
-	// invalid: metadata.deletionGracePeriodSeconds: Invalid value: 0: field is
-	// immutable"
 	err := p.remote.Delete(ctx, rmt)
 	if kerrors.IsNotFound(err) {
 		return errdefs.AsNotFound(err)
@@ -177,10 +169,9 @@ func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 		return nil, errors.Wrap(err, "cannot list pods")
 	}
 
-	// TODO(negz): Make and operate on a DeepCopy of the PodList.
 	pods := make([]*corev1.Pod, len(l.Items))
 	for i := range l.Items {
-		pod := &l.Items[i]
+		pod := l.Items[i].DeepCopy()
 		remote.RecoverPod(pod)
 		pods[i] = pod
 	}
@@ -313,17 +304,12 @@ func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
 		KubeletEndpoint: corev1.DaemonEndpoint{Port: p.cfg.DaemonPort},
 	}
 
-	// TODO(negz): Dynamically infer these from the resources the remote cluster
-	// has available? This could be difficult to measure given that the remote
-	// cluster may autoscale. These should probably just be configurable.
-	n.Status.Allocatable = corev1.ResourceList{
-		corev1.ResourceCPU:     resource.MustParse("100"),
-		corev1.ResourceMemory:  resource.MustParse("1024G"),
-		corev1.ResourceStorage: resource.MustParse("100000G"),
-		corev1.ResourcePods:    resource.MustParse("1000"),
+	n.Status.Allocatable = make(corev1.ResourceList)
+	for name, quantity := range p.cfg.Node.Resources.Allocatable {
+		n.Status.Allocatable[corev1.ResourceName(name)] = resource.MustParse(quantity)
 	}
+
 	// TODO(negz): Would leaving these out impact anything?
-	// TODO(negz): Update these messages to indicate that they're fake?
 	n.Status.Conditions = []corev1.NodeCondition{
 		{
 			Type:               corev1.NodeReady,
@@ -331,7 +317,7 @@ func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletReady",
-			Message:            "kubelet is ready.",
+			Message:            "AK always reports that it is ready.",
 		},
 		{
 			Type:               corev1.NodeMemoryPressure,
@@ -339,7 +325,7 @@ func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasSufficientMemory",
-			Message:            "kubelet has sufficient memory available",
+			Message:            "AK always reports that it has sufficient memory available",
 		},
 		{
 			Type:               corev1.NodeDiskPressure,
@@ -347,7 +333,7 @@ func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasNoDiskPressure",
-			Message:            "kubelet has no disk pressure",
+			Message:            "AK always reports that it has no disk pressure",
 		},
 
 		{
@@ -356,7 +342,7 @@ func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasSufficientPID",
-			Message:            "kubelet has sufficient PID available",
+			Message:            "AK always reports that it has sufficient PID available",
 		},
 		{
 			Type:               corev1.NodeNetworkUnavailable,
@@ -364,7 +350,7 @@ func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "RouteCreated",
-			Message:            "RouteController created a route",
+			Message:            "AK always reports that RouteController created a route",
 		},
 	}
 }
