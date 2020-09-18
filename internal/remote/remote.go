@@ -35,10 +35,6 @@ const (
 	SecretTypeReplicatedServiceAccountToken corev1.SecretType = "actual.vk/replicated-service-account-token"
 )
 
-const (
-	mountPathSAToken = "/var/run/secrets/kubernetes.io/serviceaccount"
-)
-
 // PrepareObject prepares the supplied object for submission to a remote
 // cluster by running PrepareObjectMeta on it, if possible.
 func PrepareObject(nodeName string, o runtime.Object) {

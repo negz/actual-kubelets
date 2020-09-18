@@ -2,7 +2,6 @@ package kubernetes
 
 import (
 	"context"
-	"strings"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -15,30 +14,25 @@ import (
 	"github.com/negz/actual-kubelets/internal/remote"
 )
 
-func IsTokenVolume(v corev1.Volume) bool {
-	if v.Secret == nil {
-		return false
-	}
-	if !strings.Contains(v.Name, "-token-") {
-		return false
-	}
-	return strings.Contains(v.Secret.SecretName, "-token-")
-}
-
+// A DependencyKind is a kind of resource a pod might depend on.
 type DependencyKind int
 
+// The things a pod might depend on.
 const (
 	DependencyKindConfigMap DependencyKind = iota
 	DependencyKindSecret
 	DependencyKindServiceAccountTokenSecret
 )
 
+// A Dependency of a pod.
 type Dependency struct {
 	Kind     DependencyKind
 	Name     string
 	Optional bool
 }
 
+// FindPodDependencies returns all of the resources the supplied pod depends on
+// to work as expected.
 func FindPodDependencies(pod *corev1.Pod) []Dependency {
 	deps := make([]Dependency, 0, len(pod.Spec.ImagePullSecrets))
 
@@ -67,6 +61,8 @@ func FindPodDependencies(pod *corev1.Pod) []Dependency {
 	return deps
 }
 
+// FindVolumeDependencies returns all of the dependencies the supplied volume
+// depends on to work as expected.
 func FindVolumeDependencies(v corev1.Volume) []Dependency {
 	switch {
 	case v.VolumeSource.ConfigMap != nil:
@@ -77,8 +73,10 @@ func FindVolumeDependencies(v corev1.Volume) []Dependency {
 		}}
 	case v.VolumeSource.Secret != nil:
 		k := DependencyKindSecret
-		// Service account token secrets get special handling.
-		if IsTokenVolume(v) {
+		// Service account token secrets need special handling, in that we must
+		// mutate them so that the remote service account controller does not
+		// interfere with them.
+		if remote.IsTokenVolume(v) {
 			k = DependencyKindServiceAccountTokenSecret
 		}
 
@@ -92,6 +90,8 @@ func FindVolumeDependencies(v corev1.Volume) []Dependency {
 	return nil
 }
 
+// FindContainerDependencies returns all of the dependencies the supplied
+// container depends on to work as expected.
 func FindContainerDependencies(c corev1.Container) []Dependency {
 	deps := make([]Dependency, 0)
 
@@ -133,19 +133,27 @@ func FindContainerDependencies(c corev1.Container) []Dependency {
 	return deps
 }
 
+// A DependencyFetcher fetches the dependencies of a particular pod.
 type DependencyFetcher interface {
+	// Fetch the dependencies of the supplied pod.
 	Fetch(ctx context.Context, pod *corev1.Pod) ([]runtime.Object, error)
 }
 
+// An APIDependencyFetcher fetches the dependencies of a particular pod by
+// reading them from the API server.
 type APIDependencyFetcher struct {
 	client client.Reader
 	find   func(*corev1.Pod) []Dependency
 }
 
-func NewAPIDependencyFetcher(c client.Client) *APIDependencyFetcher {
+// NewAPIDependencyFetcher returns a DependencyFetcher that fetches the
+// dependencies of a particular pod by reading them from the API server.
+func NewAPIDependencyFetcher(c client.Reader) *APIDependencyFetcher {
 	return &APIDependencyFetcher{client: c, find: FindPodDependencies}
 }
 
+// Fetch the dependencies of the supplied pod by reading them from the API
+// server.
 func (f *APIDependencyFetcher) Fetch(ctx context.Context, pod *corev1.Pod) ([]runtime.Object, error) {
 	d := f.find(pod)
 

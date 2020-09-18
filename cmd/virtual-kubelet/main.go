@@ -18,7 +18,7 @@ var (
 	name            = "actual-kubelets"
 	buildVersion    = "N/A"
 	buildTime       = "N/A"
-	k8sVersion      = "v1.18.5" // This should follow the version of k8s.io/kubernetes we are importing
+	k8sVersion      = "v1.18.6" // This should follow the version of k8s.io/kubernetes we are importing
 	numberOfWorkers = 50
 )
 

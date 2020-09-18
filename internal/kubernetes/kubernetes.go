@@ -24,6 +24,7 @@ import (
 	"github.com/negz/actual-kubelets/internal/remote"
 )
 
+// A Provider runs pods by submitting them to a remote API server.
 type Provider struct {
 	dependencies DependencyFetcher
 	remote       Client
@@ -31,6 +32,8 @@ type Provider struct {
 	cfg          Config
 }
 
+// NewProvider returns a Provider that runs pods by submitting them to a remote
+// API server.
 func NewProvider(ic provider.InitConfig) (provider.Provider, error) {
 	if ic.ConfigPath == "" {
 		return nil, errors.New("provider config file is required")
@@ -46,6 +49,9 @@ func NewProvider(ic provider.InitConfig) (provider.Provider, error) {
 		return nil, errors.Wrap(err, "cannot create client for local (kubelet) API server")
 	}
 
+	// TODO(negz): Fail if cfg.Remote.KubeConfigPath is not supplied. Omitting
+	// this setting currently results in AK using one API server as both local
+	// and remote, which can result in an endless loop of pod creation.
 	remote, err := NewClient(cfg.Remote)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot create client for remote (backing) API server")
@@ -64,6 +70,8 @@ func NewProvider(ic provider.InitConfig) (provider.Provider, error) {
 	return p, nil
 }
 
+// ApplyPodDependencies applies (i.e. creates or overwrites) the resources the
+// supplied pod depends on in order to work as expected.
 func (p *Provider) ApplyPodDependencies(ctx context.Context, lcl *corev1.Pod) error {
 	deps, err := p.dependencies.Fetch(ctx, lcl)
 	if err != nil {
@@ -89,6 +97,7 @@ func (p *Provider) ApplyPodDependencies(ctx context.Context, lcl *corev1.Pod) er
 	return nil
 }
 
+// CreatePod prepares the supplied pod and creates it in the remote API server.
 func (p *Provider) CreatePod(ctx context.Context, lcl *corev1.Pod) error {
 	if err := p.ApplyPodDependencies(ctx, lcl); err != nil {
 		return errors.Wrap(err, "cannot apply remote pod dependencies")
@@ -100,6 +109,7 @@ func (p *Provider) CreatePod(ctx context.Context, lcl *corev1.Pod) error {
 	return errors.Wrap(err, "cannot apply remote pod")
 }
 
+// UpdatePod prepares the supplied pod and updates it in the remote API server.
 func (p *Provider) UpdatePod(ctx context.Context, lcl *corev1.Pod) error {
 	if err := p.ApplyPodDependencies(ctx, lcl); err != nil {
 		return errors.Wrap(err, "cannot apply remote pod dependencies")
@@ -116,19 +126,18 @@ func (p *Provider) UpdatePod(ctx context.Context, lcl *corev1.Pod) error {
 	return errors.Wrap(err, "cannot update remote pod")
 }
 
-// DeletePod takes a Kubernetes Pod and deletes it from the provider. Once a pod is deleted, the provider is
-// expected to call the NotifyPods callback with a terminal pod status where all the containers are in a terminal
-// state, as well as the pod. DeletePod may be called multiple times for the same pod.
+// DeletePod from the remote API server.
 func (p *Provider) DeletePod(ctx context.Context, lcl *corev1.Pod) error {
 	// TODO(negz): Garbage collect empty namespaces and orphaned dependencies?
 	// This could potentially be better left to a garbage collection controller
 	// in the remote cluster.
 	rmt := lcl.DeepCopy()
-	// TODO(negz): Figure out why we're seeing the below error.
+	remote.PreparePod(p.nodeName, rmt)
+
+	// TODO(negz): Figure out why we're seeing the below error:
 	// error while updating pod status in kubernetes: Pod \"negztest\" is
 	// invalid: metadata.deletionGracePeriodSeconds: Invalid value: 0: field is
 	// immutable"
-	remote.PreparePod(p.nodeName, rmt)
 	err := p.remote.Delete(ctx, rmt)
 	if kerrors.IsNotFound(err) {
 		return errdefs.AsNotFound(err)
@@ -136,10 +145,7 @@ func (p *Provider) DeletePod(ctx context.Context, lcl *corev1.Pod) error {
 	return errors.Wrap(err, "cannot delete pod")
 }
 
-// GetPod retrieves a pod by name from the provider (can be cached).
-// The Pod returned is expected to be immutable, and may be accessed
-// concurrently outside of the calling goroutine. Therefore it is recommended
-// to return a version after DeepCopy.
+// GetPod retrieves a pod by name from the remote API server.
 func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
 	rmt := &corev1.Pod{}
 	nn := types.NamespacedName{Namespace: remote.NamespaceName(p.nodeName, namespace), Name: name}
@@ -151,10 +157,8 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.
 	return rmt.DeepCopy(), errors.Wrap(err, "cannot get pod")
 }
 
-// GetPodStatus retrieves the status of a pod by name from the provider.
-// The PodStatus returned is expected to be immutable, and may be accessed
-// concurrently outside of the calling goroutine. Therefore it is recommended
-// to return a version after DeepCopy.
+// GetPodStatus retrieves the status of a pod by name from the remote API
+// server.
 func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*corev1.PodStatus, error) {
 	rmt := &corev1.Pod{}
 	nn := types.NamespacedName{Namespace: remote.NamespaceName(p.nodeName, namespace), Name: name}
@@ -166,18 +170,14 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 	return rmt.Status.DeepCopy(), errors.Wrap(err, "cannot get pod")
 }
 
-// GetPods retrieves a list of all pods running on the provider (can be cached).
-// The Pods returned are expected to be immutable, and may be accessed
-// concurrently outside of the calling goroutine. Therefore it is recommended
-// to return a version after DeepCopy.
+// GetPods retrieves a list of all pods running on the remote API server.
 func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	l := &corev1.PodList{}
 	if err := p.remote.List(ctx, l, client.HasLabels([]string{remote.LabelKeyNodeName})); err != nil {
 		return nil, errors.Wrap(err, "cannot list pods")
 	}
 
-	log.G(ctx).Debug("Listed remote pods", l)
-
+	// TODO(negz): Make and operate on a DeepCopy of the PodList.
 	pods := make([]*corev1.Pod, len(l.Items))
 	for i := range l.Items {
 		pod := &l.Items[i]
@@ -188,15 +188,8 @@ func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	return pods, nil
 }
 
-// NotifyPods instructs the notifier to call the passed in function when
-// the pod status changes. It should be called when a pod's status changes.
-//
-// The provided pointer to a Pod is guaranteed to be used in a read-only
-// fashion. The provided pod's PodStatus should be up to date when
-// this function is called.
-//
-// NotifyPods must not block the caller since it is only used to register the callback.
-// The callback passed into `NotifyPods` may block when called.
+// NotifyPods calls the supplied changed function when a pod in the remote API
+// server may have changed.
 func (p *Provider) NotifyPods(ctx context.Context, changed func(*corev1.Pod)) {
 	i, err := p.remote.GetInformer(ctx, &corev1.Pod{})
 	if err != nil {
@@ -228,7 +221,8 @@ func (p *Provider) NotifyPods(ctx context.Context, changed func(*corev1.Pod)) {
 	})
 }
 
-// GetContainerLogs retrieves the logs of a container by name from the provider.
+// GetContainerLogs retrieves the logs of a container by name from the remote
+// API server
 func (p *Provider) GetContainerLogs(ctx context.Context, namespace, podName, containerName string, opts api.ContainerLogOpts) (io.ReadCloser, error) {
 	o := &corev1.PodLogOptions{
 		Container:    containerName,
@@ -251,8 +245,9 @@ func (p *Provider) GetContainerLogs(ctx context.Context, namespace, podName, con
 	return r, errors.Wrap(err, "cannot stream container logs")
 }
 
-// RunInContainer executes a command in a container in the pod, copying data
-// between in/out/err and the container's stdin/stdout/stderr.
+// RunInContainer executes a command in a container in the pod on the remote API
+// server, copying data between in/out/err and the container's
+// stdin/stdout/stderr.
 func (p *Provider) RunInContainer(ctx context.Context, namespace, podName, containerName string, cmd []string, attach api.AttachIO) error {
 	defer func() {
 		if attach.Stdout() != nil {
@@ -306,8 +301,7 @@ func (t *tsq) Next() *remotecommand.TerminalSize {
 	return &r
 }
 
-// ConfigureNode enables a provider to configure the node object that
-// will be used for Kubernetes.
+// ConfigureNode configures the AK Node in the local API server.
 func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
 	n.Status.NodeInfo.OperatingSystem = p.cfg.OperatingSystem
 
@@ -373,5 +367,4 @@ func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
 			Message:            "RouteController created a route",
 		},
 	}
-
 }
