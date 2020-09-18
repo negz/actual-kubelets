@@ -1,7 +1,7 @@
 image:
   repository: negz
   name: actual-kubelets
-  tag: "5010729"
+  tag: "27ebe35"
   pullPolicy: Always
 
 logLevel: debug

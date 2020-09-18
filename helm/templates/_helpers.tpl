@@ -54,6 +54,12 @@ env = [
     # actually running.
     { name = "KUBERNETES_SERVICE_HOST", value = "{{ required "A local API-server host is required" .Values.local.apiserverHost }}"}
 ]
+
+[node.resources.allocatable]
+cpu = "100"
+storage = "1024G"
+memory = "100000G"
+pods = "1000"
 {{- end }}
 
 {{- define "remotekubeconfig" }}
