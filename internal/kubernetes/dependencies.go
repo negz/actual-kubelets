@@ -110,23 +110,23 @@ func FindContainerDependencies(c corev1.Container) []Dependency {
 				Optional: pointer.DerefBoolOr(v.SecretRef.Optional, false),
 			})
 		}
-		for _, v := range c.Env {
-			switch {
-			case v.ValueFrom == nil:
-				continue
-			case v.ValueFrom.ConfigMapKeyRef != nil:
-				deps = append(deps, Dependency{
-					Kind:     DependencyKindConfigMap,
-					Name:     v.ValueFrom.ConfigMapKeyRef.Name,
-					Optional: pointer.DerefBoolOr(v.ValueFrom.ConfigMapKeyRef.Optional, false),
-				})
-			case v.ValueFrom.SecretKeyRef != nil:
-				deps = append(deps, Dependency{
-					Kind:     DependencyKindSecret,
-					Name:     v.ValueFrom.SecretKeyRef.Name,
-					Optional: pointer.DerefBoolOr(v.ValueFrom.SecretKeyRef.Optional, false),
-				})
-			}
+	}
+	for _, v := range c.Env {
+		switch {
+		case v.ValueFrom == nil:
+			continue
+		case v.ValueFrom.ConfigMapKeyRef != nil:
+			deps = append(deps, Dependency{
+				Kind:     DependencyKindConfigMap,
+				Name:     v.ValueFrom.ConfigMapKeyRef.Name,
+				Optional: pointer.DerefBoolOr(v.ValueFrom.ConfigMapKeyRef.Optional, false),
+			})
+		case v.ValueFrom.SecretKeyRef != nil:
+			deps = append(deps, Dependency{
+				Kind:     DependencyKindSecret,
+				Name:     v.ValueFrom.SecretKeyRef.Name,
+				Optional: pointer.DerefBoolOr(v.ValueFrom.SecretKeyRef.Optional, false),
+			})
 		}
 	}
 
@@ -143,19 +143,53 @@ type DependencyFetcher interface {
 // reading them from the API server.
 type APIDependencyFetcher struct {
 	client client.Reader
-	find   func(*corev1.Pod) []Dependency
+	pod    DependencyFinder
+}
+
+// A DependencyFinder returns all of the resources the supplied pod depends on
+// to work as expected.
+type DependencyFinder interface {
+	FindDependencies(*corev1.Pod) []Dependency
+}
+
+// A DependencyFinderFn returns all of the resources the supplied pod depends on
+// to work as expected.
+type DependencyFinderFn func(*corev1.Pod) []Dependency
+
+// FindDependencies returns all of the resources the supplied pod depends on to
+// work as expected.
+func (fn DependencyFinderFn) FindDependencies(pod *corev1.Pod) []Dependency {
+	return fn(pod)
+}
+
+// An APIDependencyFetcherOption configures the supplied APIDependencyFetcher.
+type APIDependencyFetcherOption func(*APIDependencyFetcher)
+
+// WithDependencyFinder configures how an APIDependencyFetcher finds the
+// dependencies it should fetch.
+func WithDependencyFinder(df DependencyFinder) APIDependencyFetcherOption {
+	return func(f *APIDependencyFetcher) {
+		f.pod = df
+	}
 }
 
 // NewAPIDependencyFetcher returns a DependencyFetcher that fetches the
 // dependencies of a particular pod by reading them from the API server.
-func NewAPIDependencyFetcher(c client.Reader) *APIDependencyFetcher {
-	return &APIDependencyFetcher{client: c, find: FindPodDependencies}
+func NewAPIDependencyFetcher(c client.Reader, o ...APIDependencyFetcherOption) *APIDependencyFetcher {
+	f := &APIDependencyFetcher{
+		client: c,
+		pod:    DependencyFinderFn(FindPodDependencies),
+	}
+	for _, fn := range o {
+		fn(f)
+	}
+	return f
 }
 
 // Fetch the dependencies of the supplied pod by reading them from the API
 // server.
 func (f *APIDependencyFetcher) Fetch(ctx context.Context, pod *corev1.Pod) ([]runtime.Object, error) {
-	d := f.find(pod)
+	d := f.pod.FindDependencies(pod)
 
 	fetched := make([]runtime.Object, 0, len(d))
 

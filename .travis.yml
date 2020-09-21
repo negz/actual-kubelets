@@ -1,0 +1,27 @@
+language: go
+
+services:
+- docker
+
+go:
+- 1.13.15
+
+jobs:
+  include:
+  - stage: test
+    script:
+    - ./scripts/review.sh
+    - ./scripts/cov.sh
+    after_success:
+      - bash <(curl -s https://codecov.io/bash)
+  - stage: push
+    install: skip
+    script:
+    - docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD"
+    - ./scripts/build.sh
+    - ./scripts/push.sh
+
+stages:
+- name: test
+- name: push
+  if: branch = master and not type = pull_request

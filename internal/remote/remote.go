@@ -15,6 +15,10 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
 )
 
+// TODO(negz): Don't call through to common methods - i.e. don't call through to
+// PrepareObjectMeta from PreparePod. Callers should stack each of these in
+// sequence as needed.
+
 const (
 	// LabelKeyNodeName represents the node-name of the Virtual Kubelet that
 	// created an object in a remote cluster. Each Virtual Kubelet should have a
@@ -170,12 +174,19 @@ func setEnvVars(cs []corev1.Container, v ...corev1.EnvVar) {
 }
 
 // PreparePodUpdate prepares the supplied remote pod to be updated in accordance
-// with the supplied local pod.
+// with the supplied local pod. Few pod fields may be updated - currently only
+// labels and annotations are supported.
 func PreparePodUpdate(nodeName string, local, remote *corev1.Pod) {
 	// TODO(negz): Allow updating container images.
-	PrepareObjectMeta(nodeName, local)
-	remote.SetLabels(local.GetLabels())
-	remote.SetAnnotations(local.GetAnnotations())
+
+	// Run PrepareObjectMeta on a copy of the local pod to ensure we maintain
+	// any AK-managed labels and annotations when we propagate the local pod's
+	// labels and annotations to the remote pod.
+	l := local.DeepCopy()
+	PrepareObjectMeta(nodeName, l)
+
+	remote.SetLabels(l.GetLabels())
+	remote.SetAnnotations(l.GetAnnotations())
 }
 
 // RecoverPod recovers the supplied pod for representation in the local cluster
@@ -221,6 +232,9 @@ func NamespaceName(nodeName, localNamespace string) string {
 // IsTokenVolume returns true if the supplied volume is (very likely to be) a
 // service account token volume.
 func IsTokenVolume(v corev1.Volume) bool {
+	// TODO(negz): We can probably raise our confidence that this is a
+	// token volume by checking that the SecretVolumeSource's DefaultMode is
+	// *420, and that `-token-` is followed by 5 random characters.
 	if v.Secret == nil {
 		return false
 	}
