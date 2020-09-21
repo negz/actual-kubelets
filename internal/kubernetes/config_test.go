@@ -19,10 +19,10 @@ func TestValidateConfigFile(t *testing.T) {
 		cfg    ConfigFile
 		want   error
 	}{
-		"MissingRemoteKubecfgPath": {
-			reason: "A remote kubeconfig path is required",
+		"MissingBothKubecfgPaths": {
+			reason: "A remote or loca kubeconfig path is required to avoid both ends using in-cluster config",
 			cfg:    ConfigFile{},
-			want:   errors.New("remote kubeconfig path is required"),
+			want:   errors.New("at least one of local or remote kubeconfig path is required"),
 		},
 		"InvalidResourceValue": {
 			reason: "Resource values must be parseable",
@@ -57,6 +57,5 @@ func TestValidateConfigFile(t *testing.T) {
 				t.Errorf("\n%s\nValidateConfig(...): -want, +got: \n%s\n", tc.reason, diff)
 			}
 		})
-
 	}
 }

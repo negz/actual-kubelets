@@ -92,8 +92,8 @@ func ParseConfigFile(path string) (ConfigFile, error) {
 
 // ValidateConfigFile returns an error if the supplied config is invalid.
 func ValidateConfigFile(cfg ConfigFile) error {
-	if cfg.Remote.KubeConfigPath == "" {
-		return errors.New("remote kubeconfig path is required")
+	if cfg.Remote.KubeConfigPath == "" && cfg.Local.KubeConfigPath == "" {
+		return errors.New("at least one of local or remote kubeconfig path is required")
 	}
 
 	for k, v := range cfg.Node.Resources.Allocatable {
